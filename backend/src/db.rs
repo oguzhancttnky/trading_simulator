@@ -1,5 +1,5 @@
-use crate::models::TickerData;
-use sqlx::PgPool;
+use crate::models::{TickerData, VolumeData, PaginatedResponse, PaginationParams};
+use sqlx::{PgPool, Row};
 
 pub async fn init_db(database_url: &str) -> Result<PgPool, sqlx::Error> {
     let pool = PgPool::connect(database_url).await?;
@@ -109,4 +109,62 @@ pub async fn save_ticker_data(pool: &PgPool, ticker: &TickerData) -> Result<(), 
     .await?;
 
     Ok(())
+}
+
+pub async fn get_latest_tickers(
+    pool: &PgPool,
+    page: i64,
+    per_page: i64,
+) -> Result<PaginatedResponse, sqlx::Error> {
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT symbol) FROM ticker_data"
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let offset = (page - 1) * per_page;
+    
+    // Query the latest data for each symbol and sort by volume in descending order with pagination
+    let volume_data = sqlx::query(
+        r#"
+        WITH LatestData AS (
+            SELECT DISTINCT ON (symbol) 
+                symbol,
+                close_price,
+                quote_volume,
+                created_at
+            FROM ticker_data
+            ORDER BY symbol ASC, created_at DESC
+        ),
+        SortedData AS (
+            SELECT 
+                symbol,
+                CAST(close_price AS DOUBLE PRECISION) as close_price,
+                CAST(quote_volume AS DOUBLE PRECISION) as quote_volume
+            FROM LatestData
+            ORDER BY quote_volume DESC
+            LIMIT $1
+            OFFSET $2
+        )
+        SELECT * FROM SortedData
+        "#,
+    )
+    .bind(per_page)
+    .bind(offset)
+    .try_map(|row: sqlx::postgres::PgRow| {
+        Ok(VolumeData {
+            symbol: row.try_get("symbol")?,
+            price: row.try_get("close_price")?,
+            volume: row.try_get("quote_volume")?,
+        })
+    })
+    .fetch_all(pool)
+    .await?;
+
+    Ok(PaginatedResponse {
+        data: volume_data,
+        total,
+        page,
+        per_page,
+    })
 }
