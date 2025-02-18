@@ -1,4 +1,4 @@
-use crate::models::{TickerData, VolumeData, PaginatedResponse, PaginationParams};
+use crate::models::{PaginatedResponse, PaginationParams, SymbolData, TickerData, VolumeData};
 use sqlx::{PgPool, Row};
 
 pub async fn init_db(database_url: &str) -> Result<PgPool, sqlx::Error> {
@@ -167,4 +167,41 @@ pub async fn get_latest_tickers(
         page,
         per_page,
     })
+}
+
+pub async fn get_currency_tickers(
+    pool: &PgPool,
+    currency: &str,
+) -> Result<Vec<SymbolData>, sqlx::Error> {
+    let tickers = sqlx::query(
+        "SELECT symbol, close_price, open_price, high_price, low_price, quote_volume 
+        FROM ticker_data WHERE symbol = $1 ORDER BY created_at DESC LIMIT 10"
+    )
+    .bind(currency)
+    .try_map(|row: sqlx::postgres::PgRow| {
+        Ok(TickerData {
+            E: row.try_get("created_at")?,
+            s: row.try_get("symbol")?,
+            c: row.try_get("close_price")?,
+            o: row.try_get("open_price")?,
+            h: row.try_get("high_price")?,
+            l: row.try_get("low_price")?,
+            q: row.try_get("quote_volume")?,
+        })
+    })
+    .fetch_all(pool)
+    .await?;
+
+    let symbol_data = tickers.into_iter().map(|ticker| {
+        SymbolData {
+            symbol: ticker.s,
+            close_price: ticker.c.parse::<f64>().unwrap_or_default(),
+            open_price: ticker.o.parse::<f64>().unwrap_or_default(),
+            high_price: ticker.h.parse::<f64>().unwrap_or_default(),
+            low_price: ticker.l.parse::<f64>().unwrap_or_default(),
+            quote_volume: ticker.q.parse::<f64>().unwrap_or_default(),
+        }
+    }).collect();
+
+    Ok(symbol_data)
 }

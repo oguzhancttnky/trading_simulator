@@ -1,11 +1,11 @@
 import { MantineProvider } from '@mantine/core';
-import CoinMarketTable from './CoinMarketTable';
 import "@mantine/core/styles.css";
+import AppRouter from './AppRouter';
 
 function App() {
   return (
     <MantineProvider>
-      <CoinMarketTable />
+      <AppRouter />
     </MantineProvider>
   );
 }

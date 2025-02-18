@@ -19,6 +19,16 @@ pub struct VolumeData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct SymbolData {
+    pub symbol: String,
+    pub close_price: f64,
+    pub open_price: f64,
+    pub high_price: f64,
+    pub low_price: f64,
+    pub quote_volume: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PaginatedResponse {
     pub data: Vec<VolumeData>,
     pub total: i64,

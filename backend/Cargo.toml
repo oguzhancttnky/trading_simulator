@@ -1,7 +1,11 @@
 [package]
-name = "trading_simulator_app"
+name = "backend"
 version = "0.1.0"
 edition = "2021"
+
+[[bin]]
+name = "backend"
+path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1.43.0", features = ["full"] }
@@ -19,3 +23,4 @@ tower = "0.4"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 websocket = "0.24.0"
+regex = "1.11.1"
