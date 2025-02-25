@@ -1,4 +1,5 @@
 use crate::models::{PaginatedResponse, PaginationParams, SymbolData, TickerData, VolumeData};
+use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 
 pub async fn init_db(database_url: &str) -> Result<PgPool, sqlx::Error> {
@@ -90,6 +91,13 @@ pub async fn init_db(database_url: &str) -> Result<PgPool, sqlx::Error> {
 }
 
 pub async fn save_ticker_data(pool: &PgPool, ticker: &TickerData) -> Result<(), sqlx::Error> {
+    // Parse string values to f64 before inserting
+    let close_price = ticker.c.parse::<f64>().unwrap_or_default();
+    let open_price = ticker.o.parse::<f64>().unwrap_or_default();
+    let high_price = ticker.h.parse::<f64>().unwrap_or_default();
+    let low_price = ticker.l.parse::<f64>().unwrap_or_default();
+    let quote_volume = ticker.q.parse::<f64>().unwrap_or_default();
+
     sqlx::query(
         r#"
         INSERT INTO ticker_data 
@@ -99,11 +107,11 @@ pub async fn save_ticker_data(pool: &PgPool, ticker: &TickerData) -> Result<(), 
         "#,
     )
     .bind(&ticker.s)
-    .bind(ticker.c.parse::<f64>().unwrap_or_default())
-    .bind(ticker.o.parse::<f64>().unwrap_or_default())
-    .bind(ticker.h.parse::<f64>().unwrap_or_default())
-    .bind(ticker.l.parse::<f64>().unwrap_or_default())
-    .bind(ticker.q.parse::<f64>().unwrap_or_default())
+    .bind(close_price)
+    .bind(open_price)
+    .bind(high_price)
+    .bind(low_price)
+    .bind(quote_volume)
     .bind(ticker.E)
     .execute(pool)
     .await?;
@@ -116,14 +124,12 @@ pub async fn get_latest_tickers(
     page: i64,
     per_page: i64,
 ) -> Result<PaginatedResponse, sqlx::Error> {
-    let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT symbol) FROM ticker_data"
-    )
-    .fetch_one(pool)
-    .await?;
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT symbol) FROM ticker_data")
+        .fetch_one(pool)
+        .await?;
 
     let offset = (page - 1) * per_page;
-    
+
     // Query the latest data for each symbol and sort by volume in descending order with pagination
     let volume_data = sqlx::query(
         r#"
@@ -174,34 +180,35 @@ pub async fn get_currency_tickers(
     currency: &str,
 ) -> Result<Vec<SymbolData>, sqlx::Error> {
     let tickers = sqlx::query(
-        "SELECT symbol, close_price, open_price, high_price, low_price, quote_volume 
-        FROM ticker_data WHERE symbol = $1 ORDER BY created_at DESC LIMIT 10"
+        r#"
+        SELECT 
+            symbol,
+            CAST(close_price AS DOUBLE PRECISION) as close_price,
+            CAST(open_price AS DOUBLE PRECISION) as open_price,
+            CAST(high_price AS DOUBLE PRECISION) as high_price,
+            CAST(low_price AS DOUBLE PRECISION) as low_price,
+            CAST(quote_volume AS DOUBLE PRECISION) as quote_volume,
+            created_at
+        FROM ticker_data 
+        WHERE symbol = $1 
+        ORDER BY created_at DESC 
+        LIMIT 10
+        "#,
     )
     .bind(currency)
     .try_map(|row: sqlx::postgres::PgRow| {
-        Ok(TickerData {
-            E: row.try_get("created_at")?,
-            s: row.try_get("symbol")?,
-            c: row.try_get("close_price")?,
-            o: row.try_get("open_price")?,
-            h: row.try_get("high_price")?,
-            l: row.try_get("low_price")?,
-            q: row.try_get("quote_volume")?,
+        Ok(SymbolData {
+            event_time: row.try_get::<DateTime<Utc>, _>("created_at")?,
+            symbol: row.try_get("symbol")?,
+            close_price: row.try_get("close_price")?,
+            open_price: row.try_get("open_price")?,
+            high_price: row.try_get("high_price")?,
+            low_price: row.try_get("low_price")?,
+            quote_volume: row.try_get("quote_volume")?,
         })
     })
     .fetch_all(pool)
     .await?;
 
-    let symbol_data = tickers.into_iter().map(|ticker| {
-        SymbolData {
-            symbol: ticker.s,
-            close_price: ticker.c.parse::<f64>().unwrap_or_default(),
-            open_price: ticker.o.parse::<f64>().unwrap_or_default(),
-            high_price: ticker.h.parse::<f64>().unwrap_or_default(),
-            low_price: ticker.l.parse::<f64>().unwrap_or_default(),
-            quote_volume: ticker.q.parse::<f64>().unwrap_or_default(),
-        }
-    }).collect();
-
-    Ok(symbol_data)
+    Ok(tickers)
 }

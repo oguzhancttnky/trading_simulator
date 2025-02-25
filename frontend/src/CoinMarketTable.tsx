@@ -11,6 +11,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import { BarChart2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 interface TickerData {
   symbol: string;
@@ -37,6 +38,7 @@ const CoinMarketTable = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const isUnmounting = useRef<boolean>(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     isUnmounting.current = false;
@@ -195,6 +197,7 @@ const CoinMarketTable = () => {
         <Table.Td>
           <Tooltip label="View Chart">
             <ActionIcon
+            onClick={() => navigate(`/currency/${ticker.symbol}`)}
               variant="subtle"
               color="gray"
               size="sm"

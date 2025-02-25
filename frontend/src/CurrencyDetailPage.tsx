@@ -5,7 +5,6 @@ import {
   Group,
   Text,
   Badge,
-  Grid,
   Stack,
   Title,
 } from "@mantine/core";
@@ -19,10 +18,13 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  Legend,
+  ReferenceLine,
 } from "recharts";
 import { useParams } from "react-router-dom";
 
 interface SymbolData {
+  event_time: string;
   symbol: string;
   close_price: number;
   open_price: number;
@@ -47,7 +49,10 @@ const CurrencyDetailPage = () => {
     isUnmounting.current = false;
 
     const connectWebSocket = () => {
-      if (isUnmounting.current || wsRef.current?.readyState === WebSocket.OPEN) {
+      if (
+        isUnmounting.current ||
+        wsRef.current?.readyState === WebSocket.OPEN
+      ) {
         return;
       }
 
@@ -57,11 +62,19 @@ const CurrencyDetailPage = () => {
       }
 
       try {
+        // Extract the base symbol without USDT for the WebSocket path
+        const baseSymbol = symbol?.replace(/USDT$/, "");
+        console.log(
+          `Connecting to WebSocket for currency: ${baseSymbol || symbol}`
+        );
+
+        // Connect to the WebSocket endpoint
         const ws = new WebSocket(`ws://127.0.0.1:8080/currency/${symbol}`);
         wsRef.current = ws;
 
         ws.onopen = () => {
           if (!isUnmounting.current) {
+            console.log(`WebSocket connection opened for ${symbol}`);
             setIsConnected(true);
             setError(null);
           }
@@ -71,31 +84,62 @@ const CurrencyDetailPage = () => {
           if (!isUnmounting.current) {
             try {
               const parsedData: SymbolData[] = JSON.parse(event.data);
-              setData(parsedData);
+              if (parsedData.length > 0) {
+                // Sort data by event_time in ascending order
+                const sortedData = [...parsedData].sort(
+                  (a, b) =>
+                    new Date(a.event_time).getTime() -
+                    new Date(b.event_time).getTime()
+                );
+                // Process data for chart display
+                const processedData = sortedData.map((item) => ({
+                  ...item,
+                  // Format the event_time for display
+                  formattedTime: formatTimeLabel(item.event_time),
+                  // Calculate price change for coloring
+                  priceChange: item.close_price - item.open_price,
+                }));
+                setData(processedData);
+              } else {
+                console.warn("Received empty data array from WebSocket");
+              }
             } catch (e) {
               console.error("Error parsing message:", e);
             }
           }
         };
 
-        ws.onerror = () => {
+        ws.onerror = (error) => {
           if (!isUnmounting.current) {
-            setError("WebSocket error occurred");
+            console.error("WebSocket error:", error);
+            setError(
+              "WebSocket error occurred. Make sure the backend is running."
+            );
             setIsConnected(false);
           }
         };
 
         ws.onclose = (event) => {
           if (!isUnmounting.current) {
+            console.log(
+              `WebSocket closed for ${symbol}. Code: ${event.code}, Reason: ${event.reason}`
+            );
             setIsConnected(false);
             if (!event.wasClean && document.visibilityState !== "hidden") {
-              reconnectTimeoutRef.current = window.setTimeout(connectWebSocket, 5000);
+              console.log("Attempting to reconnect in 5 seconds...");
+              reconnectTimeoutRef.current = window.setTimeout(
+                connectWebSocket,
+                5000
+              );
             }
           }
         };
       } catch (error) {
         if (!isUnmounting.current) {
-          setError("Failed to connect to WebSocket");
+          console.error("Failed to connect to WebSocket:", error);
+          setError(
+            `Failed to connect to WebSocket. Make sure the backend is running at 127.0.0.1:8080.`
+          );
           setIsConnected(false);
         }
       }
@@ -123,6 +167,7 @@ const CurrencyDetailPage = () => {
     };
   }, [symbol]);
 
+  // Format price values with appropriate decimal places
   const formatPrice = (price: number) => {
     return price.toLocaleString(undefined, {
       minimumFractionDigits: 2,
@@ -130,6 +175,7 @@ const CurrencyDetailPage = () => {
     });
   };
 
+  // Format volume values with K, M, B suffixes
   const formatVolume = (volume: number) => {
     if (volume >= 1_000_000_000) {
       return `$${(volume / 1_000_000_000).toFixed(2)}B`;
@@ -139,6 +185,34 @@ const CurrencyDetailPage = () => {
       return `$${(volume / 1_000).toFixed(2)}K`;
     }
     return `$${volume.toFixed(2)}`;
+  };
+
+  // Format timestamp for display
+  const formatTimeLabel = (timestamp: string) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  // Custom tooltip for the OHLC chart
+  const PriceTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <Card shadow="sm" p="xs" radius="md" withBorder>
+          <Stack gap="xs">
+            <Text fw={500} size="sm">
+              {new Date(data.event_time).toLocaleString()}
+            </Text>
+            <Text size="xs">Open: ${formatPrice(data.open_price)}</Text>
+            <Text size="xs">High: ${formatPrice(data.high_price)}</Text>
+            <Text size="xs">Low: ${formatPrice(data.low_price)}</Text>
+            <Text size="xs">Close: ${formatPrice(data.close_price)}</Text>
+            <Text size="xs">Volume: {formatVolume(data.quote_volume)}</Text>
+          </Stack>
+        </Card>
+      );
+    }
+    return null;
   };
 
   return (
@@ -152,7 +226,11 @@ const CurrencyDetailPage = () => {
                 {symbol.replace("USDT", "")} Price Chart
               </Text>
             </Stack>
-            <Badge variant="dot" color={isConnected ? "green" : "red"} size="lg">
+            <Badge
+              variant="dot"
+              color={isConnected ? "green" : "red"}
+              size="lg"
+            >
               {isConnected ? "Live" : "Disconnected"}
             </Badge>
           </Group>
@@ -162,81 +240,51 @@ const CurrencyDetailPage = () => {
             </Text>
           )}
         </Card.Section>
+      </Card>
 
-        <Grid mt="md">
-          <Grid.Col span={12}>
-            <Card withBorder>
-              <Title order={4} mb="md">Price Overview</Title>
-              <div style={{ height: 300 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="symbol" />
-                    <YAxis domain={['auto', 'auto']} />
-                    <Tooltip
-                      formatter={(value: number) => ['$' + formatPrice(value)]}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="close_price"
-                      stroke="#1c7ed6"
-                      name="Close Price"
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="open_price"
-                      stroke="#40c057"
-                      name="Open Price"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
-          </Grid.Col>
-
-          <Grid.Col span={6}>
-            <Card withBorder>
-              <Title order={4} mb="md">High/Low Prices</Title>
-              <div style={{ height: 300 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="symbol" />
-                    <YAxis domain={['auto', 'auto']} />
-                    <Tooltip
-                      formatter={(value: number) => ['$' + formatPrice(value)]}
-                    />
-                    <Bar dataKey="high_price" fill="#40c057" name="High Price" />
-                    <Bar dataKey="low_price" fill="#fa5252" name="Low Price" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
-          </Grid.Col>
-
-          <Grid.Col span={6}>
-            <Card withBorder>
-              <Title order={4} mb="md">Volume</Title>
-              <div style={{ height: 300 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="symbol" />
-                    <YAxis domain={['auto', 'auto']} />
-                    <Tooltip
-                      formatter={(value: number) => [formatVolume(value)]}
-                    />
-                    <Bar
-                      dataKey="quote_volume"
-                      fill="#1c7ed6"
-                      name="Trading Volume"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
-          </Grid.Col>
-        </Grid>
+      <Card withBorder>
+        <Title order={4} mb="md">
+          Price Chart
+        </Title>
+        <div style={{ height: 400 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart
+              data={data}
+              margin={{ top: 20, right: 30, left: 20, bottom: 70 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="formattedTime"
+                angle={-45}
+                textAnchor="end"
+                height={70}
+                tick={{ fontSize: 12 }}
+              />
+              <YAxis
+                domain={["auto", "auto"]}
+                tickFormatter={(value) => formatPrice(value)}
+              />
+              <Tooltip content={<PriceTooltip />} />
+              <Legend />
+              <ReferenceLine y={0} stroke="#666" />
+              <Line
+                type="monotone"
+                dataKey="close_price"
+                stroke="#1c7ed6"
+                name="Close Price"
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="open_price"
+                stroke="#40c057"
+                name="Open Price"
+                dot={false}
+                strokeDasharray="5 5"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       </Card>
     </Container>
   );

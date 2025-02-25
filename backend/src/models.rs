@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,6 +21,7 @@ pub struct VolumeData {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SymbolData {
+    pub event_time: DateTime<Utc>,
     pub symbol: String,
     pub close_price: f64,
     pub open_price: f64,
